@@ -1,0 +1,220 @@
+*&---------------------------------------------------------------------*
+*& Report ztest_maki3_mvc
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+
+
+*&———————————————————————*
+*& Report  ZKP_TEMPLATE_REPORT
+*&
+*&———————————————————————*
+*& A very simple MVC template for creating reports.
+*& Note the distinct lack of global variables in the main program and
+*& even in my classes. It is far better to pass references into methods,
+*& then keep track of everything globally.
+*&
+*&———————————————————————*
+
+REPORT ztest_maki3_mvc.
+
+*———————————————————————-*
+*       CLASS zcl_report_model DEFINITION
+*———————————————————————-*
+* This is a really simplistic model but you could work with your own
+* model objects and better incorporate inheritance if required,
+* to better encapsulate your business logic
+*———————————————————————-*
+CLASS zcl_report_model DEFINITION.
+
+   PUBLIC SECTION.
+     " Shared type elements that are reused globally in my application
+     " are placed here in the model
+     TYPES: ty_carrid   TYPE RANGE OF s_carr_id,
+            ty_currcode TYPE RANGE OF s_currcode,
+            tty_scarr   TYPE STANDARD TABLE OF scarr WITH KEY carrid.
+
+     METHODS: get_data IMPORTING im_carrid       TYPE zcl_report_model=>ty_carrid
+                                 im_currcode     TYPE zcl_report_model=>ty_currcode
+                       RETURNING value(re_scarr) TYPE tty_scarr.
+
+   PRIVATE SECTION.
+     " This is the only piece of global data I use in my application
+     " it exists only as long as I have a reference to an instance of
+     " this class in my program
+     DATA: gt_scarr TYPE tty_scarr.
+
+ENDCLASS.                    "zcl_report_model DEFINITION
+
+*———————————————————————-*
+*       CLASS zcl_report_view DEFINITION
+*———————————————————————-*
+* Your view is really how you intend to present the information. This
+* class is abstract and so is the method implying you need to redefine
+* it.  (Hence no implementation required)
+* You may want to render your view in different ways ALV, FILE, EMAIL
+*———————————————————————-*
+CLASS zcl_report_view DEFINITION ABSTRACT.
+
+   PUBLIC SECTION.
+
+     METHODS: display_data ABSTRACT IMPORTING im_scarr TYPE zcl_report_model=>tty_scarr.
+
+ENDCLASS.                    "zcl_report_view DEFINITION
+
+*———————————————————————-*
+*       CLASS zcl_report_view_alv DEFINITION
+*———————————————————————-*
+* So here is my new class that will implement the display method
+* using an ALV.  You can do a lot here with the SALV class for
+* displaying data, but this will be very simple.
+*———————————————————————-*
+
+CLASS zcl_report_view_alv DEFINITION FINAL INHERITING FROM zcl_report_view.
+
+   PUBLIC SECTION.
+
+     METHODS: display_data REDEFINITION.
+
+ENDCLASS.                    "zcl_report_v
+
+*———————————————————————-*
+*       CLASS zcl_report_controller DEFINITION
+*———————————————————————-*
+* This class will be used to handle the flow of the program. Passing
+* information from the views and requesting data from the model.
+* No business logic should be placed here
+*———————————————————————-*
+
+CLASS zcl_report_controller DEFINITION ABSTRACT FINAL.
+
+   PUBLIC SECTION.
+
+     " Import all the report selection variables into the controller method
+     " for executing the report
+     CLASS-METHODS: execute_report
+                      IMPORTING im_carrid   TYPE zcl_report_model=>ty_carrid
+                                im_currcode TYPE zcl_report_model=>ty_currcode.
+
+ENDCLASS.                    "zcl_report_controller DEFINITION
+
+" I need a global data statement for my selection option
+" I could create a generic select-option by adding the
+" name in brackets, however I lose the benefits from the data dictionary
+" Search helps etc in my selection screen
+" Beyond this I will not use this reference again.
+" It’s not ideal but reporting was never going to be 100% OO
+
+DATA: gt_scarr TYPE scarr.
+
+" Replace these with your report variables
+SELECT-OPTIONS: s_carrid FOR gt_scarr–carrid,
+                 s_curcod FOR gt_scarr–currcode.
+
+START-OF-SELECTION.
+
+   " Now kick off the report logic
+   zcl_report_controller=>execute_report( im_carrid   = s_carrid[]
+                                          im_currcode = s_curcod[] ).
+
+*———————————————————————-*
+*       CLASS zcl_report_controller IMPLEMENTATION
+*———————————————————————-*
+*
+*———————————————————————-*
+CLASS zcl_report_controller IMPLEMENTATION.
+
+   METHOD execute_report.
+
+     DATA: lo_model    TYPE REF TO zcl_report_model,
+           lt_scarr    TYPE zcl_report_model=>tty_scarr,
+           lo_disp     TYPE REF TO zcl_report_view,
+           lo_disp_alv TYPE REF TO zcl_report_view_alv.
+
+     CREATE OBJECT lo_model.
+
+" Execute the model method to retrieve the data I need for my report
+     lt_scarr = lo_model->get_data( im_carrid   = im_carrid
+                                    im_currcode = im_currcode ).
+
+     CREATE OBJECT lo_disp_alv.
+
+" Now output the data via the view
+" The reason I have assigned the specialised ALV class reference to the
+" generalised view class reference is purely overkill in this example.
+" However I can very quickly create a new view class and assign this
+" perhaps using a case statement to determine which view to output.
+     lo_disp = lo_disp_alv.
+     lo_disp->display_data( im_scarr = lt_scarr ).
+
+   ENDMETHOD.                    "execute_report
+
+ENDCLASS.                    "zcl_report_controller IMPLEMENTATION
+
+*———————————————————————-*
+*       CLASS zcl_report_view IMPLEMENTATION
+*———————————————————————-*
+*
+*———————————————————————-*
+
+CLASS zcl_report_view_alv IMPLEMENTATION.
+
+   METHOD display_data.
+
+     DATA: lo_salv_tab TYPE REF TO cl_salv_table,
+           lx_salv_msg TYPE REF TO cx_salv_msg,
+           lt_scarr    TYPE zcl_report_model=>tty_scarr.
+
+     lt_scarr = im_scarr.
+
+     TRY.
+" The SALV classes are excellent for quickly generating output for display
+" The factory method here generates a new instance based on my input data.
+" I could manipulate the output further prior to display if I need
+
+         cl_salv_table=>factory( IMPORTING r_salv_table = lo_salv_tab
+                                 CHANGING  t_table      = lt_scarr ).
+
+         lo_salv_tab->display( ).
+
+       CATCH cx_salv_msg INTO lx_salv_msg.
+         " You should use better exception handling here.  Possibly raise it up
+         " to the controller class and deal with an appropriate action there
+         MESSAGE e000(zkp) WITH 'An error occurred rendering the results'(001)
+                                'as an ALV'(002).
+
+     ENDTRY.
+
+   ENDMETHOD.                    "display_data
+
+ENDCLASS.                    "zcl_report_view IMPLEMENTATION
+
+*———————————————————————-*
+*       CLASS zcl_report_model IMPLEMENTATION
+*———————————————————————-*
+*
+*———————————————————————-*
+
+CLASS zcl_report_model IMPLEMENTATION.
+
+   METHOD get_data.
+
+     DATA: lt_scarr TYPE tty_scarr.
+
+     IF gt_scarr IS NOT INITIAL.
+       re_scarr = gt_scarr.
+     ENDIF.
+
+     SELECT *
+       FROM scarr
+       INTO TABLE lt_scarr
+       WHERE carrid   IN im_carrid
+       AND   currcode IN im_currcode.
+
+     IF sy–subrc = 0.
+       re_scarr = gt_scarr = lt_scarr.
+     ENDIF.
+
+   ENDMETHOD.                    "get_data
+
+ENDCLASS.                    "zcl_report_model IMPLEMENTATION
